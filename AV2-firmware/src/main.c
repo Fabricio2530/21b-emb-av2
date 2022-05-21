@@ -191,6 +191,20 @@ void pin_toggle(Pio *pio, uint32_t mask) {
 	pio_set(pio,mask);
 }
 
+void desenha_rect(int t, int n_max){
+	gfx_mono_generic_draw_filled_rect(80, 18, 40, 7, GFX_PIXEL_CLR);
+	gfx_mono_generic_draw_rect(80, 18, 40, 7, GFX_PIXEL_SET);
+	
+	int width = 40;
+	double inc = (double) width/n_max;
+	gfx_mono_generic_draw_filled_rect(80, 18, inc*t, 7, GFX_PIXEL_SET);	
+}
+
+void limpa_visor() {
+	gfx_mono_generic_draw_filled_rect(80, 18, 40, 7, GFX_PIXEL_CLR);
+	gfx_mono_generic_draw_rect(80, 18, 40, 7, GFX_PIXEL_SET);
+}
+
 /************************************************************************/
 /* TASKS                                                                */
 /************************************************************************/
@@ -201,10 +215,9 @@ static void task_oled(void *pvParameters) {
 	int temp;
 	int rtt_signal;
 	int tc_signal;
+	int contador = 0;
 	for (;;)  {
 		 if (xQueueReceive(xQueueOLED, &(temp), 1000)) {
-			
-			
 			
 			//iniciando a lógica dos processos da AV2
 			if (temp < 85 && !doing_coffe && on) {
@@ -212,6 +225,7 @@ static void task_oled(void *pvParameters) {
 				gfx_mono_draw_string("           ", 0, 20, &sysfont);
 				coffee_heat_on();
 				coffe_pump_off();
+				limpa_visor();
 				
 				if (xQueueReceive(xQueueTC, &(tc_signal),0)){
 					pin_toggle(LED_PI1, LED_PI1_IDX_MASK);
@@ -245,12 +259,16 @@ static void task_oled(void *pvParameters) {
 						pin_toggle(LED_PI1, LED_PI1_IDX_MASK);
 						pio_clear(LED_PI2, LED_PI2_IDX_MASK);
 						pio_clear(LED_PI3, LED_PI3_IDX_MASK);
+						desenha_rect(contador, 50);
 					} else if (but == 2){
 						pin_toggle(LED_PI2, LED_PI2_IDX_MASK);
 						pio_clear(LED_PI1, LED_PI1_IDX_MASK);
 						pio_clear(LED_PI3, LED_PI3_IDX_MASK);
+						desenha_rect(contador, 100);
 					}
 				}
+				
+				contador++;
 			}
 			
 			if (temp > 80 && !doing_coffe) {
@@ -258,6 +276,7 @@ static void task_oled(void *pvParameters) {
 					
 					doing_coffe = 1;
 					flag_rtt = 0;
+					contador = 0;
 					
 					//dentro de cada um desses ifs, começamos o RTT de alarme
 					if (but == 1) {
