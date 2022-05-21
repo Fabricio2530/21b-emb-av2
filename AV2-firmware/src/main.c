@@ -35,6 +35,7 @@ QueueHandle_t xQueueADC;
 QueueHandle_t xQueueOLED;
 QueueHandle_t xQueueBUT;
 QueueHandle_t xQueueRTT;
+QueueHandle_t xQueueTC;
 
 typedef struct {
 	uint value;
@@ -44,6 +45,7 @@ int doing_coffe = 0;
 int rtt_on = 0;
 int on = 1;
 int flag_rtt = 0;
+int but = 0;
 
 /************************************************************************/
 /* PROTOtypes                                                           */
@@ -108,7 +110,6 @@ static void RTT_init(float freqPrescale, uint32_t IrqNPulses, uint32_t rttIRQSou
 
 void TC1_Handler(void) {
 	volatile uint32_t ul_dummy;
-
 	ul_dummy = tc_get_status(TC0, 1);
 
 	/* Avoid compiler warning */
@@ -117,6 +118,11 @@ void TC1_Handler(void) {
 	/* Selecina canal e inicializa conversão */
 	afec_channel_enable(AFEC_POT, AFEC_POT_CHANNEL);
 	afec_start_software_conversion(AFEC_POT);
+	
+	int value = 1;
+	//ENVIANDO OS DADOS DOS LEDS
+	BaseType_t xHigherPriorityTaskWoken = pdTRUE;
+	xQueueSendFromISR(xQueueTC, &value, &xHigherPriorityTaskWoken);
 }
 
 void RTT_Handler(void) {
@@ -139,8 +145,6 @@ void RTT_Handler(void) {
 		} else {
 			signal = 1;
 		}
-		
-		printf("-------ENTROU NO ALARME DO RTT---------\n");
 		BaseType_t xHigherPriorityTaskWoken = pdTRUE;
 		xQueueSendFromISR(xQueueRTT, &signal, &xHigherPriorityTaskWoken);
 	 } 
@@ -180,6 +184,13 @@ void but3_callback(void) {
 
 }
 
+void pin_toggle(Pio *pio, uint32_t mask) {
+	if(pio_get_output_data_status(pio, mask))
+	pio_clear(pio, mask);
+	else
+	pio_set(pio,mask);
+}
+
 /************************************************************************/
 /* TASKS                                                                */
 /************************************************************************/
@@ -188,11 +199,12 @@ static void task_oled(void *pvParameters) {
 	gfx_mono_ssd1306_init();
 	
 	int temp;
-	int but;
 	int rtt_signal;
-	
+	int tc_signal;
 	for (;;)  {
 		 if (xQueueReceive(xQueueOLED, &(temp), 1000)) {
+			
+			
 			
 			//iniciando a lógica dos processos da AV2
 			if (temp < 85 && !doing_coffe && on) {
@@ -200,6 +212,13 @@ static void task_oled(void *pvParameters) {
 				gfx_mono_draw_string("           ", 0, 20, &sysfont);
 				coffee_heat_on();
 				coffe_pump_off();
+				
+				if (xQueueReceive(xQueueTC, &(tc_signal),0)){
+					pin_toggle(LED_PI1, LED_PI1_IDX_MASK);
+					pin_toggle(LED_PI2, LED_PI2_IDX_MASK);
+					pin_toggle(LED_PI3, LED_PI3_IDX_MASK);
+				}
+					
 			} else if (temp > 80 && !doing_coffe && on) {
 				gfx_mono_draw_string("Pronta               ", 0, 0, &sysfont);
 				gfx_mono_draw_string("           ", 0, 20, &sysfont);
@@ -210,12 +229,28 @@ static void task_oled(void *pvParameters) {
 					RTT_init(4, 80, RTT_MR_ALMIEN);	
 				} 
 				
+				pio_clear(LED_PI1, LED_PI1_IDX_MASK);
+				pio_clear(LED_PI2, LED_PI2_IDX_MASK);
+				pio_clear(LED_PI3, LED_PI3_IDX_MASK);
+				
 				flag_rtt = 1;
 				
 			} else if (on && doing_coffe) {
 				gfx_mono_draw_string("Fazendo cafe         ", 0, 0, &sysfont);
 				coffee_heat_off();
 				coffe_pump_on();
+				
+				if (xQueueReceive(xQueueTC, &(tc_signal),0)){
+					if (but == 1) {
+						pin_toggle(LED_PI1, LED_PI1_IDX_MASK);
+						pio_clear(LED_PI2, LED_PI2_IDX_MASK);
+						pio_clear(LED_PI3, LED_PI3_IDX_MASK);
+					} else if (but == 2){
+						pin_toggle(LED_PI2, LED_PI2_IDX_MASK);
+						pio_clear(LED_PI1, LED_PI1_IDX_MASK);
+						pio_clear(LED_PI3, LED_PI3_IDX_MASK);
+					}
+				}
 			}
 			
 			if (temp > 80 && !doing_coffe) {
@@ -250,6 +285,9 @@ static void task_oled(void *pvParameters) {
 			if (!on) {
 				coffee_heat_off();
 				coffe_pump_off();
+				pio_set(LED_PI1, LED_PI1_IDX_MASK);
+				pio_set(LED_PI2, LED_PI2_IDX_MASK);
+				pio_set(LED_PI3, LED_PI3_IDX_MASK);
 			}
 			
 			}
@@ -426,6 +464,10 @@ int main(void) {
 	xQueueRTT = xQueueCreate(100, sizeof(int));
 	if (xQueueOLED == NULL)
 	printf("falha em criar a queue xQueueRTT \n");
+	
+	xQueueTC = xQueueCreate(100, sizeof(int));
+	if (xQueueOLED == NULL)
+	printf("falha em criar a queue xQueueTC \n");
 	
 
 	/* Create task to control oled */
