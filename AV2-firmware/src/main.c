@@ -42,6 +42,8 @@ typedef struct {
 
 int doing_coffe = 0;
 int rtt_on = 0;
+int on = 1;
+int flag_rtt = 0;
 
 /************************************************************************/
 /* PROTOtypes                                                           */
@@ -130,8 +132,15 @@ void RTT_Handler(void) {
 
 	 /* IRQ due to Alarm */
 	 if ((ul_status & RTT_SR_ALMS) == RTT_SR_ALMS) {
-		int signal = 1;
-		printf("ENTROU NO ALARME DO RTT -----------------\n");
+		int signal;
+		
+		if (flag_rtt) {
+			signal = 2;	
+		} else {
+			signal = 1;
+		}
+		
+		printf("-------ENTROU NO ALARME DO RTT---------\n");
 		BaseType_t xHigherPriorityTaskWoken = pdTRUE;
 		xQueueSendFromISR(xQueueRTT, &signal, &xHigherPriorityTaskWoken);
 	 } 
@@ -148,13 +157,21 @@ void but1_callback(void){
 	//indica qual o botão que foi apertado
 	int value = 1;
 	
+	if (on == 0) {
+		on = 1;
+		flag_rtt = 0;
+	}
 	BaseType_t xHigherPriorityTaskWoken = pdTRUE;
 	xQueueSendFromISR(xQueueBUT, &value, &xHigherPriorityTaskWoken);
 }
 
 void but2_callback(void){
 	int value = 2;
-		
+	
+	if (on == 0) {
+		on = 1;
+		flag_rtt = 0;
+	}
 	BaseType_t xHigherPriorityTaskWoken = pdTRUE;
 	xQueueSendFromISR(xQueueBUT, &value, &xHigherPriorityTaskWoken);
 }
@@ -169,7 +186,6 @@ void but3_callback(void) {
 
 static void task_oled(void *pvParameters) {
 	gfx_mono_ssd1306_init();
-	gfx_mono_draw_string("oii", 0, 20, &sysfont);	
 	
 	int temp;
 	int but;
@@ -179,17 +195,24 @@ static void task_oled(void *pvParameters) {
 		 if (xQueueReceive(xQueueOLED, &(temp), 1000)) {
 			
 			//iniciando a lógica dos processos da AV2
-			if (temp < 85 && !doing_coffe) {
+			if (temp < 85 && !doing_coffe && on) {
 				gfx_mono_draw_string("Aquecendo            ", 0, 0, &sysfont);
 				gfx_mono_draw_string("           ", 0, 20, &sysfont);
 				coffee_heat_on();
 				coffe_pump_off();
-			} else if (temp > 80 && !doing_coffe) {
+			} else if (temp > 80 && !doing_coffe && on) {
 				gfx_mono_draw_string("Pronta               ", 0, 0, &sysfont);
 				gfx_mono_draw_string("           ", 0, 20, &sysfont);
 				coffee_heat_on();
 				coffe_pump_off();
-			} else {
+				
+				if (!flag_rtt){
+					RTT_init(4, 80, RTT_MR_ALMIEN);	
+				} 
+				
+				flag_rtt = 1;
+				
+			} else if (on && doing_coffe) {
 				gfx_mono_draw_string("Fazendo cafe         ", 0, 0, &sysfont);
 				coffee_heat_off();
 				coffe_pump_on();
@@ -197,8 +220,9 @@ static void task_oled(void *pvParameters) {
 			
 			if (temp > 80 && !doing_coffe) {
 				if (xQueueReceive(xQueueBUT, &(but), 0)) {
-					printf("INICIANDO O CAFÉ NUMERO: %d\n", but);
+					
 					doing_coffe = 1;
+					flag_rtt = 0;
 					
 					//dentro de cada um desses ifs, começamos o RTT de alarme
 					if (but == 1) {
@@ -213,8 +237,21 @@ static void task_oled(void *pvParameters) {
 			}
 			
 			if (xQueueReceive(xQueueRTT, &(rtt_signal),0)){
-				doing_coffe = 0;
-				gfx_mono_draw_string("Cafe PRONTO", 0, 20, &sysfont);
+				printf("Verificando o RTT signal --------------\n");
+				if (rtt_signal == 2) {
+					on = 0;
+					gfx_mono_draw_string("DESLIGADA            ", 0, 0, &sysfont);
+					coffe_pump_off();
+				} else {
+					doing_coffe = 0;
+					gfx_mono_draw_string("Cafe PRONTO", 0, 20, &sysfont);
+				}
+			
+			if (!on) {
+				coffee_heat_off();
+				coffe_pump_off();
+			}
+			
 			}
 		 }
 	}
